@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package com.ian.codonib;
+
+
+message StepData{
+    string id = 1;
+    int32 length = 2;
+    repeated Step steps = 4;
+}
+
+message Step{
+    int64 time = 1;
+    int32 step = 2;
+}
