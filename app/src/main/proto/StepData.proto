@@ -3,7 +3,7 @@ syntax = "proto3";
 package com.ian.codonib;
 
 
-message StepData{
+message StepDataReq{
     string id = 1;
     int32 length = 2;
     repeated Step steps = 4;

@@ -6,4 +6,6 @@ public class UserMode {
     public String token;
     public String deviceID;
     public String name;
+    public String uniqID;
+
 }

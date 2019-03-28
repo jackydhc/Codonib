@@ -7,11 +7,15 @@ import android.util.Base64;
 import android.util.Log;
 
 
-import com.ian.codonib.StepDataOuterClass;
+import com.ian.codonib.StepData;
 
 import java.io.IOException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -20,25 +24,26 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.Interceptor;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Request.Builder;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 
-import retrofit2.Call;
 import retrofit2.CallAdapter;
-import retrofit2.Callback;
 import retrofit2.Retrofit;
-//import retrofit2.adapter.rxjava.RxJavaCallAdapterFactory;
-//import retrofit2.converter.jackson.JacksonConverterFactory;
-//import retrofit2.converter.protobuf.ProtoConverterFactory;
+import retrofit2.converter.gson.GsonConverterFactory;
+import retrofit2.converter.protobuf.ProtoConverterFactory;
 
 public class ServiceFactory {
-
-    public static final String UPLOAD_URL = "";
-    public static final String GETSTEPS_URL = "";
+    public static final String UPLOAD_URL = "https://club-api.codoon.com/v1/user_data/upload_v2";
+    public static final String GETSTEPS_URL = "https://club-api.codoon.com/v1/user_data/daily?user_id=";
 
     public static StringBuffer agent = new StringBuffer();
     private static String deviceId;
@@ -93,6 +98,7 @@ public class ServiceFactory {
     private static String x_uniqueid;
     private static UserMode userMode;
     private static CodonApi codonApi;
+    private static OkHttpClient okHttpClient;
 
     public static void init() {
 
@@ -103,9 +109,8 @@ public class ServiceFactory {
         agent.append("android ").append(VERSION.RELEASE).append(";").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append(")");
         retrofit = new Retrofit.Builder().baseUrl("https://club-api.codoon.com/v1/").
                 client(genericClient())
-//                .addConverterFactory(ProtoConverterFactory.create())
-//                .addConverterFactory(JacksonConverterFactory.create(BaseModel.mMapper))
-//                .addCallAdapterFactory(RxJavaCallAdapterFactory.create())
+                .addConverterFactory(ProtoConverterFactory.create())
+                .addConverterFactory(GsonConverterFactory.create())
                 .build();
         codonApi = retrofit.create(CodonApi.class);
 
@@ -135,18 +140,21 @@ public class ServiceFactory {
     }
 
     public static OkHttpClient genericClient() {
-        OkHttpClient.Builder httpBuilder = new OkHttpClient.Builder();
-        httpBuilder.addInterceptor(interceptor);
-        httpBuilder.connectTimeout(1, TimeUnit.MINUTES);
-        httpBuilder.readTimeout(1, TimeUnit.MINUTES);
-        httpBuilder.writeTimeout(1, TimeUnit.MINUTES);
-        httpBuilder.retryOnConnectionFailure(true);
-        try {
-            setSSLSocketFactory(httpBuilder);
-        } catch (Exception e) {
-            e.printStackTrace();
+        if (okHttpClient == null){
+            OkHttpClient.Builder httpBuilder = new OkHttpClient.Builder();
+            httpBuilder.addInterceptor(interceptor);
+            httpBuilder.connectTimeout(1, TimeUnit.MINUTES);
+            httpBuilder.readTimeout(1, TimeUnit.MINUTES);
+            httpBuilder.writeTimeout(1, TimeUnit.MINUTES);
+            httpBuilder.retryOnConnectionFailure(true);
+            try {
+                setSSLSocketFactory(httpBuilder);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            okHttpClient = httpBuilder.build();
         }
-        return httpBuilder.build();
+        return okHttpClient;
     }
 
     public static String getSignStr(String string) {
@@ -204,26 +212,70 @@ public class ServiceFactory {
         getXDeviceId();
     }
 
-    public static void doPost(int steps,int time){
-
-        codonApi.postSteps(UPLOAD_URL,generateData(steps,time)).enqueue(new Callback<String>() {
+    public static void getCurrentStemps(){
+        Request getRequst = new Builder().url(GETSTEPS_URL + userMode.uuid+"&first_day=2019-03-22&last_day=2019-03-28").get().build();
+        okHttpClient.newCall(getRequst).enqueue(new Callback() {
             @Override
-            public void onResponse(Call<String> call, retrofit2.Response<String> response) {
-                if (response.isSuccessful()){
-                    String body = response.body();
-                    Log.d("codonservice","dopost-reslut:"+body);
+            public void onFailure(Call call, IOException e) {
 
-                }
             }
 
             @Override
-            public void onFailure(Call<String> call, Throwable t) {
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()){
+                    Log.d("codonservice","response:"+response.body().string());
+                }
 
             }
         });
     }
 
-    private static StepDataOuterClass.StepData generateData(int steps,int time{
+    public static void doPost(int steps){
+
+        retrofit2.Call<String> responseCall = codonApi.postSteps(UPLOAD_URL, generateData(steps));
+        responseCall.enqueue(new retrofit2.Callback<String>() {
+            @Override
+            public void onResponse(retrofit2.Call<String> call, retrofit2.Response<String> response) {
+                Log.d("codonservice","response:"+response.body());
+            }
+
+            @Override
+            public void onFailure(retrofit2.Call<String> call, Throwable t) {
+
+            }
+        });
+
+
+
+    }
+
+    private static StepData.StepDataReq generateData(int steps){
+        long l = System.currentTimeMillis();
+        int miniters = steps / 60;//每分钟60步
+        List<StepData.Step> stepList = new ArrayList<>();
+        StepData.Step step = null;
+        for (int i = 0; i < miniters; i++) {
+            step =  StepData.Step.newBuilder()
+                    .setStep(generateStep())
+                    .setTime(getTime(l- i * 60 * 1000)).build();
+            stepList.add(step);
+        }
+
+        StepData.StepDataReq data = StepData.StepDataReq.newBuilder()
+                .addAllSteps(stepList)
+                .setLength(1).setId(userMode.uuid).build();
+        return data;
+
+    }
+
+    private static int generateStep(){
+        return 60 + (int)(Math.random() * 10);
+    }
+
+    private static Long getTime(long time){
+        Date date = new Date(time);
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmm");
+        return Long.valueOf(sdf.format(date));
 
     }
 }
